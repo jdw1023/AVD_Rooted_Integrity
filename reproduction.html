@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reproduction Guide · Rooted Pixel AVD · Play Integrity</title>
+<meta name="description" content="The complete, battle-tested guide to standing up a rooted Pixel AVD that passes Play Integrity to MEETS_STRONG_INTEGRITY — plus the full GENERATE-vs-PATCH post-mortem." />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="Reproduction Guide · Rooted Pixel AVD passing Strong Play Integrity" />
+<meta property="og:description" content="Step-by-step setup plus the post-mortem of the one bug that makes this take days instead of hours." />
+<meta property="og:image" content="media/play-integrity-verdict.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="glow"></div>
+<div class="content">
+
+<!-- NAV -->
+<nav>
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span> AVD&nbsp;Integrity</div>
+    <div class="nav-links">
+      <a href="index.html#how">How it works</a>
+      <a href="index.html#chain">The chain</a>
+      <a href="index.html#start">Quick start</a>
+      <a href="reproduction.html">Reproduction</a>
+      <a class="nav-cta" href="https://github.com/tanishmeh/AVD_Rooted_Integrity">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<!-- DOC HERO -->
+<div class="wrap doc-hero">
+  <a class="doc-back" href="index.html">← Back to overview</a>
+  <div class="kicker">Reproduction guide + post-mortem</div>
+  <h1>Standing up a rooted Pixel AVD that passes <span class="grad">Strong Play Integrity</span></h1>
+  <p>The complete, battle-tested path to a Google-Play Android emulator that returns a populated <code>MEETS_STRONG_INTEGRITY</code> verdict — plus a full post-mortem of the one bug that makes this take days instead of hours. If you only read two things, read <a href="#trap">§7 the GENERATE-vs-PATCH trap</a> and <a href="#rule">§8 the one rule</a>.</p>
+</div>
+
+<!-- DOC LAYOUT -->
+<div class="wrap doc-layout">
+
+  <!-- TOC -->
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <ol>
+      <li><a href="#tldr">TL;DR — what matters</a></li>
+      <li><a href="#prereq">Prerequisites</a></li>
+      <li><a href="#avd">Create the AVD</a></li>
+      <li><a href="#kernel">Build the kernel</a></li>
+      <li><a href="#firstboot">First boot</a></li>
+      <li><a href="#rootstack">Install the root stack</a></li>
+      <li><a href="#configs">Configs, keybox &amp; profile</a></li>
+      <li><a href="#verify">Cold reboot &amp; verify</a></li>
+      <li><a href="#trap">The GENERATE-vs-PATCH trap</a></li>
+      <li><a href="#rule">The one rule</a></li>
+      <li><a href="#troubleshoot">Troubleshooting</a></li>
+    </ol>
+  </aside>
+
+  <!-- PROSE -->
+  <article class="prose">
+
+    <h2 id="tldr">TL;DR — what actually matters</h2>
+    <p>This stack reaches <strong>strong</strong> integrity on a pure emulator — no StrongBox hardware — because TEESimulator forges a complete attestation chain from <em>your</em> keybox and roots it in Google's attestation root. The whole game is keeping that forge in <strong>GENERATE</strong> mode and erasing every emulator tell before keymint reads it.</p>
+    <ol class="tldr">
+      <li>Build the custom kernel (KSU-Next + SUSFS + anti-emulator patches).</li>
+      <li>Boot the AVD on that kernel; install KSU-Next + the modules.</li>
+      <li>Push <code>device/data_adb/</code> + <strong>your</strong> <code>keybox.xml</code> (installed <code>0644</code>, not <code>0600</code>).</li>
+      <li>Put the pinned <code>custom.pif.prop</code> in place — <strong>do not run <code>autopif</code></strong> (it drifts to a mismatched profile).</li>
+      <li><strong>Cold reboot once. Then never touch the attestation services again.</strong></li>
+      <li>Verify the log shows TEESimulator in <strong>GENERATE</strong> mode (not PATCH), then read the verdict in a PI checker.</li>
+    </ol>
+    <p>The things that silently destroy a working setup:</p>
+    <ul>
+      <li><strong>Any restart of <code>keymint</code> / <code>keystore2</code> / <code>TEESimulator</code></strong> — scripted at +8&nbsp;s or by hand after boot → flips TEESimulator from GENERATE to PATCH → empty verdict. Recovery is a cold reboot, never a service restart.</li>
+      <li><strong><code>autopif</code> overwriting <code>custom.pif.prop</code></strong> with a non-matching profile.</li>
+      <li><strong>PIF truncating <code>security_patch.txt</code></strong> to <code>system=202605</code>. <code>00-make-fakes.sh</code> now writes it correctly and locks it immutable; if you see the truncated form, cold reboot.</li>
+    </ul>
+
+    <h2 id="prereq">0 · Prerequisites</h2>
+    <ul>
+      <li><strong>macOS arm64</strong> (Apple Silicon) or Linux x86_64 host.</li>
+      <li><strong>Docker</strong> (for the kernel build).</li>
+      <li><strong>Android SDK</strong>: <code>emulator</code> + the <code>system-images;android-36;google_apis_playstore;arm64-v8a</code> image + <code>adb</code> on PATH.</li>
+      <li><strong>A valid keybox</strong> — this is the one thing you must supply yourself. Save it as <code>device/data_adb/tricky_store/keybox.xml</code> (that path is <code>.gitignored</code>; see <a href="device/data_adb/tricky_store/keybox.xml.example">keybox.xml.example</a> for the format). Do <strong>not</strong> commit a real keybox — a public one is harvested and revoked by Google within hours.</li>
+    </ul>
+    <div class="callout warnx">
+      <span class="ci">🔑</span>
+      <p>Sanity-check the keybox isn't revoked before blaming anything else: extract each certificate's serial and check it against Google's CRL at <code>https://android.googleapis.com/attestation/status</code>. A revoked keybox produces a locally-valid chain that the <em>server</em> still rejects.</p>
+    </div>
+
+    <h2 id="avd">1 · Create the AVD</h2>
+    <p>In Android Studio's Device Manager, create a <strong>Pixel 9 Pro XL</strong> AVD on the <strong>android-36 Google Play (arm64-v8a)</strong> image, then apply <code>device/avd-config/</code>:</p>
+    <ul>
+      <li>Ensure <code>config.ini</code> has <code>hw.wifi.enabled = yes</code>.</li>
+      <li>Copy <code>advancedFeatures.ini</code> (<code>Wifi=on</code>, <code>VirtioWifi=off</code>) so QEMU uses <code>mac80211_hwsim</code> — which the custom kernel supports — instead of virtio-wifi.</li>
+    </ul>
+
+    <h2 id="kernel">2 · Build the custom kernel</h2>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
+<pre><code><span class="c-cmd">cd</span> kernel-build
+<span class="c-cmd">docker</span> build -t kbuild .
+<span class="c-com"># The kbuild-sources named volume is REQUIRED on macOS — the AOSP tree has files</span>
+<span class="c-com"># differing only in case, which collide on case-insensitive APFS.</span>
+<span class="c-cmd">docker</span> run --rm -v <span class="c-flag">"$PWD"</span>:/work -v kbuild-sources:/work/sources \
+    -w /work kbuild ./scripts/build-all.sh
+<span class="c-com"># → out/Image.gz</span></code></pre>
+    </div>
+    <p>See <a href="kernel-build/README.md">kernel-build/README.md</a> for pinned versions and troubleshooting. The build adds KernelSU-Next, SUSFS, a module-vermagic bypass, and source-level <code>/proc/modules</code> + <code>/proc/cpuinfo</code> + kernel-banner spoofs.</p>
+
+    <h2 id="firstboot">3 · First boot with the custom kernel</h2>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
+<pre><code>./scripts/start_avd.sh          <span class="c-com"># cold-boots with kernel-build/out/Image.gz</span></code></pre>
+    </div>
+    <p>The kernel has KSU-Next + SUSFS compiled in; the manager and modules aren't installed yet. Sanity check:</p>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
+<pre><code><span class="c-cmd">adb</span> shell <span class="c-str">'zcat /proc/config.gz | grep -E "CONFIG_KSU=|CONFIG_KSU_SUSFS="'</span>   <span class="c-com"># both =y</span>
+<span class="c-cmd">adb</span> shell <span class="c-str">'cat /proc/modules | grep -ciE "goldfish|hwsim|virtio_"'</span>           <span class="c-com"># 0</span></code></pre>
+    </div>
+
+    <h2 id="rootstack">4 · Install the root stack</h2>
+    <p>Per <a href="device/modules.md">device/modules.md</a> (exact validated URLs are in that file):</p>
+    <ol>
+      <li>Install the <strong>KernelSU-Next manager</strong> APK → launch once → confirm <code>adb shell su -c id</code> returns <code>uid=0</code>.</li>
+      <li>Install these modules, then reboot:
+        <ul>
+          <li><strong>SUSFS</strong> (<code>susfs4ksu</code>)</li>
+          <li><strong>ReZygisk</strong></li>
+          <li><strong>PlayIntegrityFork</strong></li>
+          <li><strong>TEESimulator</strong> / <code>tricky_store</code> (JingMatrix)</li>
+        </ul>
+      </li>
+    </ol>
+    <div class="callout"><span class="ci">ℹ️</span><p>Vector / <code>zygisk_vector</code> is <strong>optional</strong> and not required for Play Integrity — the working reference has it only for unrelated LSPosed modules. Skip it.</p></div>
+
+    <h2 id="configs">5 · Apply configs + keybox + the pinned PIF profile</h2>
+    <p>PlayIntegrityFork must already be installed (step 4) — its profile file is the single source of truth that the boot scripts derive everything from.</p>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
+<pre><code><span class="c-com"># Pushes device/data_adb/ (the boot scripts), installs YOUR keybox at 0644</span>
+<span class="c-com"># root:root, AND copies device/pif/custom.pif.prop into the PIF module</span>
+<span class="c-com"># (and modules_update/ so autopif can't replace it). DO NOT run autopif.</span>
+./scripts/install-device-setup.sh</code></pre>
+    </div>
+    <p>That single command does everything for this step — it refuses to run if PIF isn't installed or the keybox is missing or still the placeholder.</p>
+    <div class="callout danger"><span class="ci">🔐</span><p>The keybox is installed <strong>world-readable (<code>0644</code>)</strong> on purpose: TEESimulator runs <em>injected into</em> the keystore2/keymint process, not as root, so a <code>0600</code> root-only keybox is unreadable there and TEESimulator silently falls back to PATCH mode. The install script handles the <code>chmod 644</code> for you.</p></div>
+
+    <h2 id="verify">6 · Cold reboot — exactly once — then verify</h2>
+    <p>A <strong>cold</strong> boot is mandatory (a warm/snapshot boot skips the boot scripts and TEESimulator won't land in GENERATE mode). Use the launch script, not <code>adb reboot</code>:</p>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
+<pre><code><span class="c-cmd">adb</span> emu kill                 <span class="c-com"># fully stop the emulator</span>
+<span class="c-com"># wait for the window to close, then cold-boot with the custom kernel:</span>
+./scripts/start_avd.sh
+<span class="c-com"># wait ~90s for boot + the post-fs-data.d / service.d scripts to settle</span>
+./scripts/verify-integrity.sh <span class="c-flag">--trigger</span></code></pre>
+    </div>
+    <p><code>verify-integrity.sh</code> is <strong>read-only</strong> — it never restarts a service. It confirms: identity matches the profile, the <code>/vendor/build.prop</code> bind mount, <code>/proc</code> is clean, TEESimulator is alive, the keybox is <code>0644</code>, and — the key one — <strong>TEESimulator is in GENERATE mode</strong>. Then open the Play Store (or a Play Integrity checker) and confirm the verdict is populated and Play Protect shows certified.</p>
+    <div class="callout warnx"><span class="ci">⛔</span><p>After boot, do <strong>not</strong> run <code>adb reboot</code>, <code>killall</code>, or any service restart. The cold boot above is the only correct way to apply changes or recover.</p></div>
+
+    <h2 id="trap">7 · The GENERATE-vs-PATCH trap</h2>
+    <p>This is the bug that costs the most time. There is no real TEE on an emulator, so <strong>TEESimulator</strong> forges the hardware-attestation chain from your <code>keybox.xml</code>. But it can forge it <strong>two different ways</strong>, and only one is accepted by Google's server:</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mode</th><th>Log signature</th><th>What it builds</th><th>Server</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="tag-good">GENERATE ✅</td>
+            <td><code>Generating new attested key pair for alias: 'integrity.api.key.alias'</code> → <code>Successfully generated new certificate chain</code></td>
+            <td>A brand-new leaf key + a full chain signed by your keybox → rooted in Google's attestation root. <strong>Internally consistent.</strong></td>
+            <td class="tag-good">Accepts</td>
+          </tr>
+          <tr>
+            <td class="tag-bad">PATCH ❌</td>
+            <td><code>Remove patched chain …</code> → <code>Cached patched certificate chain for KeyIdentifier(uid=10146, …)</code></td>
+            <td>Takes the emulator's <em>real</em> keymint leaf and rewrites the chain to claim the keybox root. The leaf signature no longer matches its parent. <strong>Inconsistent.</strong></td>
+            <td class="tag-bad">Rejects → empty verdict</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>What selects the mode</h3>
+    <p>TEESimulator decides <strong>once, at its own startup</strong>, from a live "TEE functionality check":</p>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">logcat</span></div>
+<pre><code>TEESimulator: Performing TEE functionality check...
+TEESimulator: TEE functionality check successful.   <span class="c-com">← believes a real TEE works → PATCH (BAD)</span>
+
+<span class="c-com"># vs. the good path on a clean emulator boot:</span>
+keystore2: ... "TEESimulator_AttestationCheck" ... Error::Km(CANNOT_ATTEST_IDS)   <span class="c-com">← check fails → GENERATE (GOOD)</span></code></pre>
+    </div>
+    <p>On a clean cold boot, TrickyStore's own <code>service.sh</code> launches TEESimulator <strong>early</strong> — while keystore2/keymint still can't produce a hardware attestation — so the check fails and TEESimulator correctly chooses <strong>GENERATE</strong>. The boot scripts must then leave it running. <code>service.d/08-tee-broken.sh</code> only re-asserts the immutable <code>tee_status.txt</code> / <code>security_patch.txt</code>; it does <strong>not</strong> restart TEESimulator.</p>
+    <div class="callout danger">
+      <span class="ci">🪤</span>
+      <p><strong>Corrected, log-verified design.</strong> An earlier <code>08-tee-broken.sh</code> killed and relaunched TEESimulator at <code>boot_completed + 8s</code>, on the theory that one controlled restart was "required." That was wrong — by +8&nbsp;s keymint IS ready, so the relaunched instance's check <strong>succeeds → PATCH → empty verdict</strong>. The startup log shows it directly: an early instance with <code>check failed</code> (GENERATE) and a second with <code>check successful</code> (PATCH). The fix: there must be <strong>zero</strong> TEESimulator restarts.</p>
+    </div>
+    <h3>Verify the mode (after triggering one PI check)</h3>
+    <div class="codeblock">
+      <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
+<pre><code><span class="c-cmd">adb</span> shell su -c <span class="c-str">'logcat -d | grep -c "Generating new attested key pair for alias: .integrity.api.key.alias"'</span>  <span class="c-com"># want &gt;0</span>
+<span class="c-cmd">adb</span> shell su -c <span class="c-str">'logcat -d | grep -c "patched certificate chain for KeyIdentifier(uid=10146"'</span>                 <span class="c-com"># want 0</span></code></pre>
+    </div>
+
+    <h2 id="rule">8 · The one rule</h2>
+    <p>After the device is set up and booted, <strong>the attestation services are untouchable</strong>:</p>
+    <ul>
+      <li><span class="tag-good">✅</span> To apply ANY change (props, scripts, keybox, pif): <strong>cold reboot.</strong></li>
+      <li><span class="tag-bad">❌</span> Never <code>killall keystore2 / keymint / TEESimulator</code> or <code>setprop ctl.restart</code> on them by hand.</li>
+      <li><span class="tag-bad">❌</span> Never add additional service restarts to the boot scripts.</li>
+      <li><span class="tag-bad">❌</span> Never run <code>autopif</code> — it overwrites <code>custom.pif.prop</code> with a drifting profile.</li>
+    </ul>
+    <p>If integrity is lost: <strong>cold reboot</strong>. That re-runs the boot scripts and lands TEESimulator back in GENERATE mode. Nothing else.</p>
+
+    <h2 id="troubleshoot">10 · Quick troubleshooting</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Symptom</th><th>Most likely cause</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>Empty verdict, log shows <code>patched certificate chain</code> for <code>integrity.api.key.alias</code></td><td>TEESimulator in PATCH mode — a restart flipped it (two <code>TEE functionality check</code> lines: one <code>failed</code>, one <code>successful</code>)</td><td><strong>Cold reboot.</strong> Ensure <code>08-tee-broken.sh</code> has NO TEESimulator restart; never <code>killall</code> the services by hand.</td></tr>
+          <tr><td><code>security_patch.txt</code> shows <code>system=202605</code> (truncated)</td><td>PIF's action.sh corrupted it after boot</td><td><code>00-make-fakes.sh</code> writes it correctly and <code>chattr +i</code>-locks it; cold reboot.</td></tr>
+          <tr><td><code>CANNOT_ATTEST_IDS</code> spam, identity still <code>emu64a</code></td><td>prop spoof / build.prop bind didn't apply before keymint</td><td>Cold reboot (scripts run in order). Don't <code>killall keymint</code>.</td></tr>
+          <tr><td><code>MODEL=Pixel Fold</code> / <code>DEVICE=felix</code></td><td><code>autopif</code> overwrote the profile</td><td>Re-copy the pinned <code>device/pif/custom.pif.prop</code>, cold reboot, never autopif.</td></tr>
+          <tr><td>Verdict empty but chain is GENERATE + not revoked</td><td>device not certified yet / no GSF android_id</td><td>Ensure Wi-Fi is connected; let it check in; cold reboot.</td></tr>
+          <tr><td><code>TEESimulator not running</code></td><td>daemon died</td><td><code>05-tee-watchdog.sh</code> relaunches it; if not, cold reboot.</td></tr>
+          <tr><td>Works on reference, fails on yours, configs identical</td><td>keybox <code>0600</code> (unreadable by injected TEESimulator)</td><td><code>chmod 644</code> the keybox (install script does this), cold reboot.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout good" style="margin-top:36px">
+      <span class="ci">📄</span>
+      <p>This page mirrors <a href="docs/REPRODUCTION.md">docs/REPRODUCTION.md</a>, which also carries the full §9 post-mortem (every wrong turn and the diff that cracked it). For the layer-by-layer reasoning, see <a href="docs/INTEGRITY_CHAIN.md">docs/INTEGRITY_CHAIN.md</a>.</p>
+    </div>
+
+  </article>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand">AVD Integrity</div>
+        <p>A development &amp; testing tool for reproducing strong-integrity device behavior on an emulator. Source and scripts only — bring your own keybox.</p>
+      </div>
+      <div class="foot-links">
+        <a href="index.html">Overview</a>
+        <a href="https://github.com/tanishmeh/AVD_Rooted_Integrity">GitHub</a>
+        <a href="docs/INTEGRITY_CHAIN.md">The chain</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>
