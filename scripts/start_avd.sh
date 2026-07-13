@@ -78,6 +78,13 @@ if [[ -d "$AVD_DIR" ]]; then
     if [[ -f "${AVD_TEMPLATE_DIR}/advancedFeatures.ini" ]]; then
         echo "==> syncing advancedFeatures.ini (Wifi=on, VirtioWifi=off)"
         cp -f "${AVD_TEMPLATE_DIR}/advancedFeatures.ini" "$ADV_FEAT"
+        # Emulator 36 also reads ~/.android/advancedFeatures.ini at startup; the
+        # SDK copy defaults VirtioWifi=on and can override the per-AVD file.
+        cp -f "${AVD_TEMPLATE_DIR}/advancedFeatures.ini" "$HOME/.android/advancedFeatures.ini"
+    fi
+    if [[ -f "$AVD_CFG" ]] && ! grep -q '^PlayStore.enabled' "$AVD_CFG"; then
+        echo "==> adding PlayStore.enabled=yes to $AVD_CFG"
+        echo "PlayStore.enabled = yes" >> "$AVD_CFG"
     fi
 else
     echo "WARNING: AVD dir not found: $AVD_DIR (set AVD= to match your device name)" >&2
@@ -105,6 +112,9 @@ EMU_ARGS=(
     -no-snapshot-load
     -no-snapshot-save
     -verbose
+    # Force mac80211_hwsim path; per-AVD advancedFeatures.ini alone is not enough
+    # on emulator 36 — SDK defaults still enable virtio-wifi-pci (see avd-boot.log).
+    -feature VirtioWifi=off
 )
 if [[ -n "${KERNEL_APPEND}" ]]; then
     # config.ini kernel.parameters is not always merged on API 36; -qemu -append
