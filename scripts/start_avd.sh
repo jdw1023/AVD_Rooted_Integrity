@@ -104,7 +104,17 @@ echo "    log:      $LOG"
 if [[ -n "${KERNEL_APPEND}" ]]; then
     echo "    cmdline:  ${KERNEL_APPEND} (via -qemu -append)"
 fi
+if [[ "${SHOW_KERNEL}" == "1" ]]; then
+    echo "    kernel console: ttyS0 -> stdout (-qemu -serial stdio)"
+fi
 echo
+
+KERNEL_APPEND_EFFECTIVE="$KERNEL_APPEND"
+if [[ "${SHOW_KERNEL}" == "1" ]]; then
+    # Emulator 36 no longer accepts -show-kernel (QEMU rejects it). Route the
+    # guest serial port to stdout and override console=0 from the default append.
+    KERNEL_APPEND_EFFECTIVE="${KERNEL_APPEND_EFFECTIVE} console=ttyS0 earlyprintk=serial"
+fi
 
 EMU_ARGS=(
     -avd "$AVD_NAME"
@@ -113,13 +123,17 @@ EMU_ARGS=(
     -no-snapshot-save
     -verbose
 )
-if [[ -n "${KERNEL_APPEND}" ]]; then
+QEMU_FWD=()
+if [[ "${SHOW_KERNEL}" == "1" ]]; then
+    QEMU_FWD+=( -serial stdio )
+fi
+if [[ -n "${KERNEL_APPEND_EFFECTIVE}" ]]; then
     # config.ini kernel.parameters is not always merged on API 36; -qemu -append
     # is forwarded to qemu-system-x86_64 and does show up in the final cmdline.
-    EMU_ARGS+=( -qemu -append "$KERNEL_APPEND" )
+    QEMU_FWD+=( -append "$KERNEL_APPEND_EFFECTIVE" )
 fi
-if [[ "${SHOW_KERNEL}" == "1" ]]; then
-    EMU_ARGS+=( -show-kernel )
+if [[ ${#QEMU_FWD[@]} -gt 0 ]]; then
+    EMU_ARGS+=( -qemu "${QEMU_FWD[@]}" )
 fi
 
 # -no-snapshot-load forces a cold boot so the -kernel override actually fires.
