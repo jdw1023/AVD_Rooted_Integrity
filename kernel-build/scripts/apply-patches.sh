@@ -82,6 +82,12 @@ echo "==> Applying Wild KSU<->SUSFS integration patch"
     -r /tmp/wild-ksu.rej -i "${WILD_KSU_PATCH}" )
 
 # ----------------------------------------------------------------------------
+# 4b. x86_64 KSU compile fixes (Wild patch + clang -Werror)
+# ----------------------------------------------------------------------------
+echo "==> Fixing x86_64 KernelSU compile issues"
+bash "${ROOT}/scripts/fix-ksu-x86_64.sh" "${KERNEL_DIR}"
+
+# ----------------------------------------------------------------------------
 # 5. Stage SUSFS source files
 # ----------------------------------------------------------------------------
 echo "==> Staging SUSFS files into kernel tree"
