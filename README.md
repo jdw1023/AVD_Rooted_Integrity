@@ -36,7 +36,7 @@ hiding).
 
 | Path | What |
 |---|---|
-| [`kernel-build/`](kernel-build/) | Docker + scripts that build AOSP `common-android15-6.6` with KSU-Next, SUSFS, module-vermagic bypass, and `/proc/{modules,cpuinfo}` + banner spoofs. Output: `out/Image.gz`. |
+| [`kernel-build/`](kernel-build/) | Docker + scripts that build AOSP `common-android15-6.6` (x86_64) with KSU-Next, SUSFS, module-vermagic bypass, and `/proc/modules` + banner spoofs. Output: `out/bzImage`. |
 | [`device/data_adb/`](device/) | The on-device setup pushed to `/data/adb`: `post-fs-data.d/` prop spoofs + bind mounts, `service.d/` watchdogs, SUSFS rules, `avd-fake/` fakes, and TrickyStore config. |
 | [`device/pif/`](device/pif/) | PlayIntegrityFork profile (Pixel 9 / `tokay` / CANARY). |
 | [`device/avd-config/`](device/avd-config/) | Host-side `config.ini` + `advancedFeatures.ini` templates (the critical Wi-Fi flags). |
@@ -114,7 +114,7 @@ rooted in Google's attestation root from that keybox, this setup reaches
 
 ## Validated configuration
 
-Pixel 9 (`tokay`) CANARY profile, android-36 `google_apis_playstore arm64-v8a`,
+Pixel 9 (`tokay`) CANARY profile, android-36 `google_apis_playstore x86_64`,
 custom 6.6 kernel. Module versions this was validated against are in
 [`device/modules.md`](device/modules.md).
 

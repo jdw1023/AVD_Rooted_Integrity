@@ -12,7 +12,6 @@ device/data_adb/tricky_store/keybox.xml
 kernel-build/sources/
 kernel-build/out/
 kernel-build/.ccache/
-kernel-build/patches/
 kernel-build/docs/
 *.log
 
@@ -21,6 +20,7 @@ kernel-build/docs/
 *.img.gz
 Image
 Image.gz
+bzImage
 *.tar.gz
 *.zip
 *.apk

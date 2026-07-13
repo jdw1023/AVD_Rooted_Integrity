@@ -14,8 +14,9 @@ QEMU/goldfish/ranchu fingerprints from userspace.
 | Module vermagic bypass | Lets the AVD's prebuilt `.ko` files load despite the rebuilt kernel's vermagic — without it, mediaswcodec's driver chain never comes up and the apex SIGABRTs |
 | `CONFIG_LSM` without `baseband_guard` | The LSM stack we want; AOSP common doesn't ship baseband_guard |
 | `/proc/modules` filter | goldfish_*, virtio_*, mac80211_hwsim hidden from the module list |
-| `/proc/cpuinfo` spoof | Reports a Tensor-class layout (implementer `0x41`, Cortex-X4/A720/A520 part IDs) |
+| `/proc/cpuinfo` spoof | On x86_64: runtime SUSFS open_redirect to `avd-fake/cpuinfo` (Tensor layout). Kernel-level injection is arm64-only. |
 | Kernel banner | `LOCALVERSION` says `Pixel10Pro`, not `Wild`/`ranchu` |
+| x86_64 syscall hardening bypass | Kernel source patches + `syscall_hardening=off` cmdline so KernelSU syscall hooks work on 6.6+ |
 
 These customizations are injected **directly into the kernel source** by
 `scripts/customize-kernel.sh` (Python edits guarded by an `AVD_SPOOF_INJECTED`
@@ -66,7 +67,7 @@ docker run --rm \
     -w /work kbuild ./scripts/build-all.sh
 ```
 
-Output (copied to the host bind mount): `out/Image` and `out/Image.gz`.
+Output (copied to the host bind mount): `out/bzImage`.
 
 > **Why the `kbuild-sources` named volume is required.** The AOSP kernel tree
 > contains files that differ only in case (e.g.
@@ -76,8 +77,41 @@ Output (copied to the host bind mount): `out/Image` and `out/Image.gz`.
 > exists"* and the build never starts. A Docker **named volume** lives on
 > Docker's case-sensitive Linux filesystem, so the checkout succeeds. `out/`
 > stays on the host bind mount (just two files, no collision) so you can grab
-> `Image.gz`. On a case-sensitive Linux host you can drop the named volume, but
+> `bzImage`. On a case-sensitive Linux host you can drop the named volume, but
 > it's harmless to keep.
+
+## x86_64 support
+
+This build targets **`x86_64`** (the `google_apis_playstore x86_64` AVD system
+image). KernelSU Next fully supports x86_64, but newer kernels harden the syscall
+path with direct branches, which blocks KSU's syscall-table hooking unless you
+handle it.
+
+### Why it breaks
+
+[This upstream commit](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=1e3ad78334a69b36e107232e337f9d693dcc9df2)
+converted indirect branches in the x86_64 syscall path into direct conditional
+branches. KernelSU's `syscall_hook` modifies syscall-table entries to route
+intercepted calls through its unified dispatcher; with hardening enabled, those
+modifications are ignored and KSU aborts initialization to avoid a panic.
+
+### How this repo fixes it (pick one method — not both)
+
+**We use Option 2** (kernel source patches), because the pinned KernelSU commit
+predates `CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER` (added in KSU 3.2.6+).
+
+| Method | What we do |
+|---|---|
+| **Option 1** (KSU 3.2.6+ only) | Enable `CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y` in `build.sh` and **remove** the `patches/x86_64/` step from `apply-patches.sh`. Do **not** pass `syscall_hardening=off`. |
+| **Option 2** (this repo) | Apply `patches/x86_64/01-*.patch` + `02-*.patch` (from [android-generic/kernel_common](https://github.com/android-generic/kernel_common) 6.6 commits `fe9a9b4` + `df772e9`). Boot with `syscall_hardening=off` (`start_avd.sh` passes this via `-append`). |
+
+> **Security warning:** Either option intentionally bypasses or weakens a
+> mitigation against speculative-execution attacks on the syscall path. **Do not
+> use this on production systems** where side-channel security is critical. This
+> is for testing environments where KernelSU root is prioritized.
+
+For other kernel versions, see [KernelSU Next x86_64 docs](https://github.com/KernelSU-Next/KernelSU-Next/blob/master/website/docs/guide/x86_64-support.md)
+(6.12 / 6.18 patch links there).
 
 ### Per-step (useful when iterating)
 
@@ -107,12 +141,12 @@ Use the repo-root launcher (uses your host Android SDK):
 ```bash
 ../scripts/start_avd.sh
 # or override the AVD name / kernel:
-AVD=Pixel_9_Pro_XL KERNEL="$PWD/out/Image.gz" ../scripts/start_avd.sh
+AVD=Pixel_9_Pro_XL KERNEL="$PWD/out/bzImage" ../scripts/start_avd.sh
 ```
 
-It passes `-kernel out/Image.gz -no-snapshot-load -no-snapshot-save` to the
-emulator. The AVD's system/vendor/userdata stay exactly as they were — only the
-kernel changes.
+It passes `-kernel out/bzImage -append syscall_hardening=off -no-snapshot-load
+-no-snapshot-save` to the emulator. The AVD's system/vendor/userdata stay exactly
+as they were — only the kernel changes.
 
 ## What to verify after boot
 
@@ -120,7 +154,7 @@ kernel changes.
 # 1. /proc/modules doesn't list goldfish/hwsim/virtio
 adb shell 'su -c "grep -iE \"goldfish|hwsim|virtio\" /proc/modules | wc -l"'   # → 0
 
-# 2. /proc/cpuinfo shows implementer 0x41
+# 2. /proc/cpuinfo shows implementer 0x41 (via SUSFS redirect to avd-fake/cpuinfo)
 adb shell 'su -c "grep -m1 implementer /proc/cpuinfo"'                          # → 0x41
 
 # 3. KSU is active
@@ -149,19 +183,23 @@ single-shot and cached. Subsequent runs skip.
 **Source customization didn't apply.** `customize-kernel.sh` is idempotent and
 guarded by an `AVD_SPOOF_INJECTED` marker comment. If a customization is
 missing, AOSP moved the function it anchors on (e.g. `m_show` in
-`kernel/module/procfs.c`, `c_show` in `arch/arm64/kernel/cpuinfo.c`). The
+`kernel/module/procfs.c`). On x86_64, `/proc/cpuinfo` is not kernel-patched —
+check that `02-avd-deeper-spoof.sh` redirected it to `avd-fake/cpuinfo`. The
 Python `assert`s will fail loudly pointing at the function that moved; adjust
 the anchor regex in `customize-kernel.sh` to match the new context.
 
 **Build fails with `<asm/...>: No such file or directory`.** clang's
-`--target=aarch64-linux-gnu` isn't finding the sysroot. Inside the container,
-confirm `clang --target=aarch64-linux-gnu --print-search-dirs`.
+`--target=x86_64-linux-gnu` isn't finding the sysroot. Inside the container,
+confirm `clang --target=x86_64-linux-gnu --print-search-dirs`.
 
 **AVD won't boot the new kernel.** Look at `../avd-boot.log` — a panic in init
 usually means a driver we depend on got disabled. `build.sh` deliberately keeps
 `CONFIG_GOLDFISH_*`/`CONFIG_VIRTIO_*` as `=m` (not forced `=y`) so init's insmod
 calls still succeed; don't change that.
 
-**KSU shows "not installed" after boot.** `CONFIG_KSU` didn't land. Confirm
-with `zcat /proc/config.gz | grep KSU`. If empty, re-run `apply-patches.sh` with
-`bash -x` to see where KSU-Next integration failed.
+**KSU shows "not installed" after boot.** `CONFIG_KSU` didn't land, or x86_64
+syscall hardening blocked hook init. Confirm with `zcat /proc/config.gz | grep KSU`.
+Check `dmesg` for KernelSU init errors. If you disabled the kernel patches,
+ensure `syscall_hardening=off` is on the cmdline (`adb shell cat /proc/cmdline`)
+or enable `CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER` instead (not both). Re-run
+`apply-patches.sh` with `bash -x` if integration failed.

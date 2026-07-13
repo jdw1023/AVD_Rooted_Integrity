@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the AOSP common-android15-6.6 kernel with our patches applied.
-# Output: sources/kernel/arch/arm64/boot/Image.gz
+# Output: sources/kernel/arch/x86_64/boot/bzImage
 #
 # Re-run safe: incremental builds work via ccache.
 
@@ -18,9 +18,9 @@ cd "${KERNEL_DIR}"
 
 # With LLVM=1 LLVM_IAS=1 the kernel uses clang for compilation, integrated
 # assembler, ld.lld for linking, llvm-objcopy. CROSS_COMPILE is still set so
-# helpers that shell out to ${CROSS_COMPILE}gcc find aarch64-linux-gnu-gcc.
-export ARCH=arm64
-export CROSS_COMPILE=aarch64-linux-gnu-
+# helpers that shell out to ${CROSS_COMPILE}gcc find x86_64-linux-gnu-gcc.
+export ARCH=x86_64
+export CROSS_COMPILE=x86_64-linux-gnu-
 export LLVM=1
 export LLVM_IAS=1
 # ccache wraps via /usr/lib/ccache symlinks already on PATH
@@ -68,24 +68,23 @@ EOF
 make -j "${JOBS}" olddefconfig
 
 echo "==> Build (parallel jobs=${JOBS})"
-time make -j "${JOBS}" Image Image.gz
+time make -j "${JOBS}" bzImage
 
 echo
 echo "==> Build complete"
-ls -la arch/arm64/boot/Image* | sed 's|^|    |'
+ls -la arch/x86_64/boot/bzImage | sed 's|^|    |'
 
 # Copy the kernel image out of the named-volume source tree into the host-
-# bind-mounted /work/out/ so avd-boot.sh on the host can find it. Do this
+# bind-mounted /work/out/ so start_avd.sh on the host can find it. Do this
 # BEFORE the banner-print pipeline below -- grep -m1 closes its stdin which
 # gives `strings` SIGPIPE, which with pipefail set would abort the script
 # right before we copied the output. Copy first, then the banner is decorative.
 OUTDIR="${ROOT}/out"
 mkdir -p "${OUTDIR}"
-cp -fv arch/arm64/boot/Image    "${OUTDIR}/Image"
-cp -fv arch/arm64/boot/Image.gz "${OUTDIR}/Image.gz"
+cp -fv arch/x86_64/boot/bzImage "${OUTDIR}/bzImage"
 echo
-echo "==> Kernel images copied to host at: kernel-build/out/"
+echo "==> Kernel image copied to host at: kernel-build/out/bzImage"
 
 echo
 echo "Kernel build version banner:"
-( strings arch/arm64/boot/Image || true ) | grep -m1 "Linux version" | sed 's|^|    |' || true
+( strings arch/x86_64/boot/bzImage || true ) | grep -m1 "Linux version" | sed 's|^|    |' || true

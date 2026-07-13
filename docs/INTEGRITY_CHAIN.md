@@ -41,8 +41,8 @@ keymint reads the attestation IDs not just from the top-level `ro.product.*`
 props, but from **per-partition props** (`ro.product.<vendor|odm|product|
 system_dlkm|system_ext|vendor_dlkm>.*`) **and from the on-disk
 `/vendor/build.prop` file directly**. PIF only spoofs the top-level props, so
-the per-partition values and the file contents still leak `emu64a` /
-`sdk_gphone64_arm64`. keymint compares the caller's requested IDs against its
+the per-partition values and the file contents still leak `emu64x` /
+`sdk_gphone64_x86_64`. keymint compares the caller's requested IDs against its
 cached IDs and throws `CANNOT_ATTEST_IDS` on any mismatch.
 
 The fix is layered:
@@ -66,7 +66,7 @@ verdict.
 
 > Diagnosing: `adb shell su -c 'logcat -d | grep CANNOT_ATTEST_IDS'`. If any
 > appear, the chain rebuild never even starts. Verify
-> `getprop ro.product.vendor.device` → `tokay` (not `emu64a`) and
+> `getprop ro.product.vendor.device` → `tokay` (not `emu64x`) and
 > `grep "^ro.product" /vendor/build.prop` shows the spoofed values. The recovery
 > is **cold reboot**, then re-check.
 

@@ -1,14 +1,15 @@
 #!/bin/bash
 # Apply, in order matching Wild Kernels' build pipeline exactly:
 #   1. Reset kernel tree
-#   2. KernelSU-Next setup (drops drivers/kernelsu into the tree)
-#   3. Wild's KSU<->SUSFS integration patch (disables syscall hooks that
+#   2. x86_64 syscall-hardening bypass patches (KernelSU syscall hooks)
+#   3. KernelSU-Next setup (drops drivers/kernelsu into the tree)
+#   4. Wild's KSU<->SUSFS integration patch (disables syscall hooks that
 #      crash Android 16 mediaswcodec)
-#   4. Copy SUSFS source files into kernel tree
-#   5. Sublevel-specific pre-SUSFS sed fixes
-#   6. Apply SUSFS kernel patch (|| true; sublevel fixes may already absorb)
-#   7. Revert the pre-SUSFS sed fixes
-#   8. Our anti-emulator source customizations
+#   5. Copy SUSFS source files into kernel tree
+#   6. Sublevel-specific pre-SUSFS sed fixes
+#   7. Apply SUSFS kernel patch (|| true; sublevel fixes may already absorb)
+#   8. Revert the pre-SUSFS sed fixes
+#   9. Our anti-emulator source customizations
 #
 # After this, the kernel source tree is ready for build.sh.
 
@@ -38,7 +39,25 @@ SUBLEVEL=$(grep -m1 '^SUBLEVEL' Makefile | awk '{print $3}')
 echo "==> Kernel sublevel: ${SUBLEVEL}"
 
 # ----------------------------------------------------------------------------
-# 2. KernelSU-Next
+# 2. x86_64 syscall-hardening bypass (KernelSU syscall_hook on 6.6+)
+# Newer kernels harden the x86_64 syscall path with direct branches, which
+# blocks KSU's syscall-table hooking. These two upstream-derived patches add
+# X86_FEATURE_INDIRECT_SAFE and let `syscall_hardening=off` on the kernel
+# cmdline re-enable the indirect syscall table (start_avd.sh passes that flag).
+# Do NOT combine with CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER — pick one method.
+# See kernel-build/README.md § x86_64 support.
+# ----------------------------------------------------------------------------
+X86_PATCH_DIR="${ROOT}/patches/x86_64"
+echo "==> Applying x86_64 syscall-hardening bypass patches"
+for p in "${X86_PATCH_DIR}"/01-*.patch "${X86_PATCH_DIR}"/02-*.patch; do
+    [[ -f "$p" ]] || continue
+    echo "  - ${p##*/}"
+    patch -p1 -F 3 -N --no-backup-if-mismatch -r /tmp/x86-syscall.rej \
+        -i "$p"
+done
+
+# ----------------------------------------------------------------------------
+# 3. KernelSU-Next
 # setup.sh ignores any pre-existing KSU_DIR and clones fresh into
 # $(pwd)/KernelSU-Next (= ${KERNEL_DIR}/KernelSU-Next). We pass the pinned
 # commit so it checks that one out instead of "latest tagged release".
@@ -48,9 +67,9 @@ echo "==> Integrating KernelSU-Next @ ${KSU_COMMIT:0:12}"
 bash "${KSU_DIR}/kernel/setup.sh" "${KSU_COMMIT}"
 
 # ----------------------------------------------------------------------------
-# 3. Wild's KSU<->SUSFS integration patch
+# 4. Wild's KSU<->SUSFS integration patch
 # This patch disables KSU-Next's aggressive syscall hooks (lsm_hook,
-# syscall_event_bridge, tp_marker, arm64/syscall_hook, etc.) that crash
+# syscall_event_bridge, tp_marker, x86_64/syscall_hook, etc.) that crash
 # mediaswcodec on Android 16. Keeps only the setuid hook + extras.
 # ----------------------------------------------------------------------------
 WILD_KSU_PATCH="${WILD_DIR}/wild/ksun-5a4a718-susfs-f7ae19ef-gki-android14-6.1.patch"
@@ -63,14 +82,14 @@ echo "==> Applying Wild KSU<->SUSFS integration patch"
     -r /tmp/wild-ksu.rej -i "${WILD_KSU_PATCH}" )
 
 # ----------------------------------------------------------------------------
-# 4. Stage SUSFS source files
+# 5. Stage SUSFS source files
 # ----------------------------------------------------------------------------
 echo "==> Staging SUSFS files into kernel tree"
 cp -v "${SUSFS_DIR}/kernel_patches/fs/"*.c                fs/
 cp -v "${SUSFS_DIR}/kernel_patches/include/linux/"*.h     include/linux/
 
 # ----------------------------------------------------------------------------
-# 5. Pre-SUSFS sed fixes (Wild's "Fake Patches" for android15-6.6)
+# 6. Pre-SUSFS sed fixes (Wild's "Fake Patches" for android15-6.6)
 # These add temporary #include directives so the SUSFS kernel patch's
 # context lines match across sublevels.
 # ----------------------------------------------------------------------------
@@ -92,7 +111,7 @@ if [ "${SUBLEVEL}" -le 58 ] 2>/dev/null; then
 fi
 
 # ----------------------------------------------------------------------------
-# 6. Apply SUSFS kernel patch
+# 7. Apply SUSFS kernel patch
 # ----------------------------------------------------------------------------
 SUSFS_KERNEL_PATCH=$(ls "${SUSFS_DIR}/kernel_patches"/*.patch 2>/dev/null | head -1)
 if [[ -z "${SUSFS_KERNEL_PATCH}" ]]; then
@@ -104,7 +123,7 @@ patch -p1 -F 3 -N --no-backup-if-mismatch -r /tmp/susfs.rej \
     -i "${SUSFS_KERNEL_PATCH}" || true
 
 # ----------------------------------------------------------------------------
-# 7. Revert the pre-SUSFS sed fixes (Wild does this too)
+# 8. Revert the pre-SUSFS sed fixes (Wild does this too)
 # ----------------------------------------------------------------------------
 echo "==> Reverting pre-SUSFS sed fixes"
 if [ "${SUBLEVEL}" -le 92 ] 2>/dev/null; then
@@ -115,7 +134,7 @@ if [ "${SUBLEVEL}" -le 57 ] 2>/dev/null; then
 fi
 
 # ----------------------------------------------------------------------------
-# 8. Module-version bypass hack (Wild's "Bypass" variant).
+# 9. Module-version bypass hack (Wild's "Bypass" variant).
 # Forces kernel/module/version.c::check_version to return 1 instead of 0 on
 # vermagic mismatch -- so the AVD's pre-built .ko files (which carry the
 # original kernel's vermagic) actually load. Without this, mediaswcodec's
@@ -144,10 +163,10 @@ if ls android/abi_gki_protected_exports_* >/dev/null 2>&1; then
 fi
 
 # ----------------------------------------------------------------------------
-# 9. Our anti-emulator source customizations
+# 10. Our anti-emulator source customizations
 # ----------------------------------------------------------------------------
 echo "==> Customizing kernel source for AVD anti-detection"
-bash "${ROOT}/scripts/customize-kernel.sh" "${KERNEL_DIR}"
+KERNEL_ARCH=x86_64 bash "${ROOT}/scripts/customize-kernel.sh" "${KERNEL_DIR}"
 
 touch "${KERNEL_DIR}/.avd-patches-applied"
 echo

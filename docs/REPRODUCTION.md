@@ -36,10 +36,10 @@ The things that silently destroy a working setup:
 
 ## 0. Prerequisites
 
-- **macOS arm64** (Apple Silicon) or Linux x86_64 host.
+- **Linux x86_64** host (recommended — matches the `x86_64` AVD image).
 - **Docker** (for the kernel build).
 - **Android SDK**: `emulator` + the
-  `system-images;android-36;google_apis_playstore;arm64-v8a` image + `adb` on PATH.
+  `system-images;android-36;google_apis_playstore;x86_64` image + `adb` on PATH.
 - **A valid keybox.** A TEE-class AOSP keybox. Save it as
   `device/data_adb/tricky_store/keybox.xml` (that path is `.gitignored`; see
   `keybox.xml.example`). Do **not** commit a real keybox — a public one is
@@ -52,7 +52,7 @@ The things that silently destroy a working setup:
 ## 1. Create the AVD
 
 In Android Studio's Device Manager, create a **Pixel 9 Pro XL** AVD on the
-**android-36 Google Play (arm64-v8a)** image, then apply `device/avd-config/`:
+**android-36 Google Play (x86_64)** image, then apply `device/avd-config/`:
 
 - Ensure `config.ini` has `hw.wifi.enabled = yes`.
 - Copy `advancedFeatures.ini` (`Wifi=on`, `VirtioWifi=off`) so QEMU uses
@@ -67,15 +67,16 @@ docker build -t kbuild .
 # differing only in case, which collide on case-insensitive APFS.
 docker run --rm -v "$PWD":/work -v kbuild-sources:/work/sources \
     -w /work kbuild ./scripts/build-all.sh
-# → out/Image.gz
+# → out/bzImage
 ```
 
-See `kernel-build/README.md` for pinned versions and troubleshooting.
+See `kernel-build/README.md` for pinned versions, x86_64 syscall-hardening
+handling, and troubleshooting.
 
 ## 3. First boot with the custom kernel
 
 ```bash
-./scripts/start_avd.sh          # cold-boots with kernel-build/out/Image.gz
+./scripts/start_avd.sh          # cold-boots with kernel-build/out/bzImage
 ```
 
 The kernel has KSU-Next + SUSFS compiled in; the manager and modules aren't
@@ -307,7 +308,7 @@ be deleted for it to reproduce elsewhere.)
 |---|---|---|
 | Empty verdict, log shows `patched certificate chain` for `integrity.api.key.alias` | TEESimulator in PATCH mode. Check the startup log: two `TEE functionality check` lines (one `failed`, one `successful`) = a restart flipped it | **Cold reboot.** Ensure `08-tee-broken.sh` has NO TEESimulator restart, and never `killall` the services by hand. After a clean boot you should see only `TEE functionality check failed.` (one instance). |
 | `security_patch.txt` shows `system=202605` (truncated) | PIF's action.sh corrupted it after boot | `00-make-fakes.sh` now writes it correctly and `chattr +i`-locks it; cold reboot. Manually: `chattr -i`, rewrite all three lines `=YYYY-MM-DD`, `chattr +i`. |
-| `CANNOT_ATTEST_IDS` spam, identity still `emu64a` | prop spoof / build.prop bind didn't apply before keymint | Cold reboot (scripts run in order). Don't `killall keymint`. |
+| `CANNOT_ATTEST_IDS` spam, identity still `emu64x` | prop spoof / build.prop bind didn't apply before keymint | Cold reboot (scripts run in order). Don't `killall keymint`. |
 | `MODEL=Pixel Fold` / `DEVICE=felix` | `autopif` overwrote the profile | Re-copy tokay `device/pif/custom.pif.prop`, cold reboot, never autopif. |
 | Verdict empty but chain is GENERATE + not revoked | device not certified yet / no GSF android_id | Ensure Wi-Fi is connected; let it check in; cold reboot. |
 | `TEESimulator not running` | daemon died | `05-tee-watchdog.sh` relaunches it; if not, cold reboot. |

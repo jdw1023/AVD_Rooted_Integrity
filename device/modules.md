@@ -99,7 +99,7 @@ different Android version, edit only `custom.pif.prop` and cold reboot.**
 ### Using a different Android version
 
 The repo's custom kernel is GKI `android15-6.6` (6.6.66); it boots Android
-14/15/16 `google_apis_playstore arm64-v8a` system images. The version-specific
+14/15/16 `google_apis_playstore x86_64` system images. The version-specific
 partition fields are taken from your image automatically (above), so you do **not**
 need to hand-edit build.props. You should still pick a `custom.pif.prop` profile
 whose device is a real Pixel; ideally one from a similar Android era. The module

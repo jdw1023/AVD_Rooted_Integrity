@@ -54,8 +54,8 @@ FAKE_DIR=/data/adb/avd-fake
   # "playintegrityfix", "zygisk_vector", "rezygisk", "tricky_store" in
   # their own memory map -- that's a direct Play Integrity failure.
   for so in \
-      /data/adb/modules/playintegrityfix/zygisk/arm64-v8a.so \
-      /data/adb/modules/zygisk_vector/zygisk/arm64-v8a.so \
+      /data/adb/modules/playintegrityfix/zygisk/x86_64.so \
+      /data/adb/modules/zygisk_vector/zygisk/x86_64.so \
       /data/adb/modules/rezygisk/lib64/libzygisk.so \
       /data/adb/modules/tricky_store/libTEESimulator.so
   do

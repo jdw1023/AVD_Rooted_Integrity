@@ -1,7 +1,6 @@
-# Build environment for AOSP common-android15-6.6 kernel with KSU-Next + SUSFS
-# + custom anti-emulator patches. Uses Ubuntu 24.04's native clang-18, which
-# matches the AOSP prebuilt clang-r522817's version and works natively on
-# Apple Silicon (no Rosetta needed).
+# Build environment for AOSP common-android15-6.6 kernel (x86_64) with KSU-Next
+# + SUSFS + custom anti-emulator patches. Uses Ubuntu 24.04's native clang-18,
+# which matches the AOSP prebuilt clang-r522817's version.
 #
 # To use:
 #   docker build -t kbuild .
@@ -19,18 +18,17 @@ ENV LANG=C.UTF-8
 #
 # When CC=clang LLVM=1 LLVM_IAS=1, the kernel uses clang for compilation,
 # integrated assembler, ld.lld for linking, llvm-objcopy etc. We still need
-# binutils-aarch64-linux-gnu for a couple of helpers (mkimage, objtool, etc).
+# binutils-x86-64-linux-gnu for a couple of helpers (objtool, etc).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git xz-utils unzip \
         build-essential bc bison flex \
         libssl-dev openssl libelf-dev \
         kmod cpio rsync \
         python3 python3-pip \
-        device-tree-compiler \
         zstd lz4 \
         ccache \
         clang lld llvm llvm-dev \
-        gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+        gcc-x86-64-linux-gnu binutils-x86-64-linux-gnu \
     && rm -rf /var/lib/apt/lists/* \
     && clang --version \
     && ld.lld --version

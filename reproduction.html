@@ -84,9 +84,9 @@
 
     <h2 id="prereq">0 · Prerequisites</h2>
     <ul>
-      <li><strong>macOS arm64</strong> (Apple Silicon) or Linux x86_64 host.</li>
+      <li><strong>Linux x86_64</strong> host (recommended — matches the <code>x86_64</code> AVD image).</li>
       <li><strong>Docker</strong> (for the kernel build).</li>
-      <li><strong>Android SDK</strong>: <code>emulator</code> + the <code>system-images;android-36;google_apis_playstore;arm64-v8a</code> image + <code>adb</code> on PATH.</li>
+      <li><strong>Android SDK</strong>: <code>emulator</code> + the <code>system-images;android-36;google_apis_playstore;x86_64</code> image + <code>adb</code> on PATH.</li>
       <li><strong>A valid keybox</strong> — this is the one thing you must supply yourself. Save it as <code>device/data_adb/tricky_store/keybox.xml</code> (that path is <code>.gitignored</code>; see <a href="https://github.com/tanishmeh/AVD_Rooted_Integrity/blob/master/device/data_adb/tricky_store/keybox.xml.example" target="_blank" rel="noopener">keybox.xml.example ↗</a> for the format). Do <strong>not</strong> commit a real keybox — a public one is harvested and revoked by Google within hours.</li>
     </ul>
     <div class="callout warnx">
@@ -95,7 +95,7 @@
     </div>
 
     <h2 id="avd">1 · Create the AVD</h2>
-    <p>In Android Studio's Device Manager, create a <strong>Pixel 9 Pro XL</strong> AVD on the <strong>android-36 Google Play (arm64-v8a)</strong> image, then apply <code>device/avd-config/</code>:</p>
+    <p>In Android Studio's Device Manager, create a <strong>Pixel 9 Pro XL</strong> AVD on the <strong>android-36 Google Play (x86_64)</strong> image, then apply <code>device/avd-config/</code>:</p>
     <ul>
       <li>Ensure <code>config.ini</code> has <code>hw.wifi.enabled = yes</code>.</li>
       <li>Copy <code>advancedFeatures.ini</code> (<code>Wifi=on</code>, <code>VirtioWifi=off</code>) so QEMU uses <code>mac80211_hwsim</code> — which the custom kernel supports — instead of virtio-wifi.</li>
@@ -110,14 +110,14 @@
 <span class="c-com"># differing only in case, which collide on case-insensitive APFS.</span>
 <span class="c-cmd">docker</span> run --rm -v <span class="c-flag">"$PWD"</span>:/work -v kbuild-sources:/work/sources \
     -w /work kbuild ./scripts/build-all.sh
-<span class="c-com"># → out/Image.gz</span></code></pre>
+<span class="c-com"># → out/bzImage</span></code></pre>
     </div>
     <p>See <a href="https://github.com/tanishmeh/AVD_Rooted_Integrity/blob/master/kernel-build/README.md" target="_blank" rel="noopener">kernel-build/README.md ↗</a> for pinned versions and troubleshooting. The build adds KernelSU-Next, SUSFS, a module-vermagic bypass, and source-level <code>/proc/modules</code> + <code>/proc/cpuinfo</code> + kernel-banner spoofs.</p>
 
     <h2 id="firstboot">3 · First boot with the custom kernel</h2>
     <div class="codeblock">
       <div class="bar"><span class="d" style="background:#ff5f56"></span><span class="d" style="background:#ffbd2e"></span><span class="d" style="background:#27c93f"></span><span class="t">bash</span></div>
-<pre><code>./scripts/start_avd.sh          <span class="c-com"># cold-boots with kernel-build/out/Image.gz</span></code></pre>
+<pre><code>./scripts/start_avd.sh          <span class="c-com"># cold-boots with kernel-build/out/bzImage</span></code></pre>
     </div>
     <p>The kernel has KSU-Next + SUSFS compiled in; the manager and modules aren't installed yet. Sanity check:</p>
     <div class="codeblock">
@@ -226,7 +226,7 @@ keystore2: ... "TEESimulator_AttestationCheck" ... Error::Km(CANNOT_ATTEST_IDS) 
         <tbody>
           <tr><td>Empty verdict, log shows <code>patched certificate chain</code> for <code>integrity.api.key.alias</code></td><td>TEESimulator in PATCH mode — a restart flipped it (two <code>TEE functionality check</code> lines: one <code>failed</code>, one <code>successful</code>)</td><td><strong>Cold reboot.</strong> Ensure <code>08-tee-broken.sh</code> has NO TEESimulator restart; never <code>killall</code> the services by hand.</td></tr>
           <tr><td><code>security_patch.txt</code> shows <code>system=202605</code> (truncated)</td><td>PIF's action.sh corrupted it after boot</td><td><code>00-make-fakes.sh</code> writes it correctly and <code>chattr +i</code>-locks it; cold reboot.</td></tr>
-          <tr><td><code>CANNOT_ATTEST_IDS</code> spam, identity still <code>emu64a</code></td><td>prop spoof / build.prop bind didn't apply before keymint</td><td>Cold reboot (scripts run in order). Don't <code>killall keymint</code>.</td></tr>
+          <tr><td><code>CANNOT_ATTEST_IDS</code> spam, identity still <code>emu64x</code></td><td>prop spoof / build.prop bind didn't apply before keymint</td><td>Cold reboot (scripts run in order). Don't <code>killall keymint</code>.</td></tr>
           <tr><td><code>MODEL=Pixel Fold</code> / <code>DEVICE=felix</code></td><td><code>autopif</code> overwrote the profile</td><td>Re-copy the pinned <code>device/pif/custom.pif.prop</code>, cold reboot, never autopif.</td></tr>
           <tr><td>Verdict empty but chain is GENERATE + not revoked</td><td>device not certified yet / no GSF android_id</td><td>Ensure Wi-Fi is connected; let it check in; cold reboot.</td></tr>
           <tr><td><code>TEESimulator not running</code></td><td>daemon died</td><td><code>05-tee-watchdog.sh</code> relaunches it; if not, cold reboot.</td></tr>

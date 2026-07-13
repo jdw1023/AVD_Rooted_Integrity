@@ -1,0 +1,195 @@
+From df772e99e392f24b395ceaf7b26974e3e4828ee9 Mon Sep 17 00:00:00 2001
+From: hmtheboy154 <buingoc67@gmail.com>
+Date: Thu, 10 Oct 2024 04:37:18 -0400
+Subject: [PATCH] Set X86_FEATURE_INDIRECT_SAFE using a cmdline option instead
+
+Allow users to manually set this
+
+Signed-off-by: hmtheboy154 <buingoc67@gmail.com>
+---
+ arch/x86/kernel/cpu/bugs.c   | 31 +--------------------
+ arch/x86/kernel/cpu/common.c | 53 ++++++++++++++++++++++++++++++++++++
+ drivers/base/cpu.c           | 12 ++++++++
+ include/linux/cpu.h          |  4 +++
+ 4 files changed, 70 insertions(+), 30 deletions(-)
+
+diff --git a/arch/x86/kernel/cpu/bugs.c b/arch/x86/kernel/cpu/bugs.c
+index 3cd4da967d66..c2dc9b7426ac 100644
+--- a/arch/x86/kernel/cpu/bugs.c
++++ b/arch/x86/kernel/cpu/bugs.c
+@@ -1664,15 +1664,6 @@ static void __init bhi_select_mitigation(void)
+ 	if (!IS_ENABLED(CONFIG_X86_64))
+ 		return;
+ 
+-	/*
+-	 * There's no hardware mitigation in place, so mark indirect branches
+-	 * as unsafe.
+-	 *
+-	 * One could argue the SW loop makes indirect branches safe again, but
+-	 * Linus prefers it this way.
+-	 */
+-	setup_clear_cpu_cap(X86_FEATURE_INDIRECT_SAFE);
+-
+ 	/* Mitigate KVM by default */
+ 	setup_force_cpu_cap(X86_FEATURE_CLEAR_BHB_LOOP_ON_VMEXIT);
+ 	pr_info("Spectre BHI mitigation: SW BHB clearing on vm exit\n");
+@@ -1687,21 +1678,6 @@ static void __init spectre_v2_select_mitigation(void)
+ 	enum spectre_v2_mitigation_cmd cmd = spectre_v2_parse_cmdline();
+ 	enum spectre_v2_mitigation mode = SPECTRE_V2_NONE;
+ 
+-	/*
+-	 * X86_FEATURE_INDIRECT_SAFE indicates whether indirect calls can be
+-	 * considered safe.  That means either:
+-	 *
+-	 *   - the CPU isn't vulnerable to Spectre v2 or its variants;
+-	 *
+-	 *   - a hardware mitigation is in place (e.g., IBRS, BHI_DIS_S); or
+-	 *
+-	 *   - the user turned off mitigations altogether.
+-	 *
+-	 * Assume innocence until proven guilty: set the cap bit now, then
+-	 * clear it later if/when needed.
+-	 */
+-	setup_force_cpu_cap(X86_FEATURE_INDIRECT_SAFE);
+-
+ 	/*
+ 	 * If the CPU is not affected and the command line mode is NONE or AUTO
+ 	 * then nothing to do.
+@@ -1788,16 +1764,11 @@ static void __init spectre_v2_select_mitigation(void)
+ 		break;
+ 
+ 	case SPECTRE_V2_LFENCE:
+-		setup_clear_cpu_cap(X86_FEATURE_INDIRECT_SAFE);
+-		fallthrough;
+ 	case SPECTRE_V2_EIBRS_LFENCE:
+ 		setup_force_cpu_cap(X86_FEATURE_RETPOLINE_LFENCE);
+-		setup_force_cpu_cap(X86_FEATURE_RETPOLINE);
+-		break;
++		fallthrough;
+ 
+ 	case SPECTRE_V2_RETPOLINE:
+-		setup_clear_cpu_cap(X86_FEATURE_INDIRECT_SAFE);
+-		fallthrough;
+ 	case SPECTRE_V2_EIBRS_RETPOLINE:
+ 		setup_force_cpu_cap(X86_FEATURE_RETPOLINE);
+ 		break;
+diff --git a/arch/x86/kernel/cpu/common.c b/arch/x86/kernel/cpu/common.c
+index 74d566263467..114fb835d33e 100644
+--- a/arch/x86/kernel/cpu/common.c
++++ b/arch/x86/kernel/cpu/common.c
+@@ -276,6 +276,39 @@ static int __init x86_noinvpcid_setup(char *s)
+ }
+ early_param("noinvpcid", x86_noinvpcid_setup);
+ 
++enum syscall_hardening_switch {
++	SYSCALL_HARDENING_ON,
++	SYSCALL_HARDENING_OFF,
++};
++
++static enum syscall_hardening_switch syscall_hardening __ro_after_init = SYSCALL_HARDENING_ON;
++
++static int __init syscall_hardening_parse_cmdline(char *str)
++{
++	if (!str)
++		return -EINVAL;
++
++	if (!strcmp(str, "off"))
++		syscall_hardening = SYSCALL_HARDENING_OFF;
++	else if (!strcmp(str, "on"))
++		syscall_hardening = SYSCALL_HARDENING_ON;
++	else
++		pr_err("Ignoring unknown syscall_hardening option (%s)", str);
++
++	return 0;
++}
++early_param("syscall_hardening", syscall_hardening_parse_cmdline);
++
++static void __init syscall_hardening_disable(void)
++{
++	pr_info("syscall hardening function called \n");
++	if (syscall_hardening == SYSCALL_HARDENING_ON)
++		return;
++
++	setup_force_cpu_cap(X86_FEATURE_INDIRECT_SAFE);
++	pr_info("Syscall hardening is disabled to allow indirect calls !\n");
++}
++
+ #ifdef CONFIG_X86_32
+ static int cachesize_override = -1;
+ static int disable_x86_serial_nr = 1;
+@@ -2403,6 +2436,12 @@ void __init arch_cpu_finalize_init(void)
+ {
+ 	identify_boot_cpu();
+ 
++	/* Projects like KernelSU is relying on hooking indirect syscall which 
++	 * is being hardened by default on recent kernel. Allow disabling it 
++	 * if user specified in cmdline.
++	 */
++	syscall_hardening_disable();
++
+ 	/*
+ 	 * identify_boot_cpu() initialized SMT support information, let the
+ 	 * core code know.
+@@ -2464,3 +2503,17 @@ void __init arch_cpu_finalize_init(void)
+ 	 */
+ 	mem_encrypt_init();
+ }
++
++#ifdef CONFIG_SYSFS
++static ssize_t syscall_hardening_show_state(char *buf)
++{
++	if (boot_cpu_has(X86_FEATURE_INDIRECT_SAFE))
++		return sysfs_emit(buf, "Syscall hardening: Disabled\n");
++	return sysfs_emit(buf, "Syscall hardening: Enabled\n");
++}
++
++ssize_t cpu_show_syscall_hardening(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	return syscall_hardening_show_state(buf);
++}
++#endif
+diff --git a/drivers/base/cpu.c b/drivers/base/cpu.c
+index ef427ee787a9..42c80a9dcaac 100644
+--- a/drivers/base/cpu.c
++++ b/drivers/base/cpu.c
+@@ -292,6 +292,15 @@ static ssize_t print_cpus_isolated(struct device *dev,
+ }
+ static DEVICE_ATTR(isolated, 0444, print_cpus_isolated, NULL);
+ 
++#if defined(CONFIG_X86) || defined(CONFIG_X86_64)
++ssize_t __weak cpu_show_syscall_hardening(struct device *dev,
++				 struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "Not available\n");
++}
++static DEVICE_ATTR(syscall_hardening, 0444, cpu_show_syscall_hardening, NULL);
++#endif
++
+ #ifdef CONFIG_NO_HZ_FULL
+ static ssize_t print_cpus_nohz_full(struct device *dev,
+ 				    struct device_attribute *attr, char *buf)
+@@ -495,6 +504,9 @@ static struct attribute *cpu_root_attrs[] = {
+ 	&dev_attr_kernel_max.attr,
+ 	&dev_attr_offline.attr,
+ 	&dev_attr_isolated.attr,
++#if defined(CONFIG_X86) || defined(CONFIG_X86_64)
++	&dev_attr_syscall_hardening.attr,
++#endif
+ #ifdef CONFIG_NO_HZ_FULL
+ 	&dev_attr_nohz_full.attr,
+ #endif
+diff --git a/include/linux/cpu.h b/include/linux/cpu.h
+index a7d91a167a8b..27e2f0e1194b 100644
+--- a/include/linux/cpu.h
++++ b/include/linux/cpu.h
+@@ -77,6 +77,10 @@ extern ssize_t cpu_show_gds(struct device *dev,
+ 			    struct device_attribute *attr, char *buf);
+ extern ssize_t cpu_show_reg_file_data_sampling(struct device *dev,
+ 					       struct device_attribute *attr, char *buf);
++#if defined(CONFIG_X86) || defined(CONFIG_X86_64)						   
++extern ssize_t cpu_show_syscall_hardening(struct device *dev,
++					       struct device_attribute *attr, char *buf);
++#endif
+ 
+ extern __printf(4, 5)
+ struct device *cpu_device_create(struct device *parent, void *drvdata,

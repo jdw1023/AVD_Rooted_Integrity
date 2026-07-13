@@ -45,7 +45,7 @@ fi
 
 # -- KernelSU-Next -------------------------------------------------------------
 # Pin to the exact commit Wild Kernels uses. The dev-branch HEAD has aggressive
-# syscall hooks (syscall_event_bridge, tp_marker, arm64/syscall_hook) that
+# syscall hooks (syscall_event_bridge, tp_marker, x86_64/syscall_hook) that
 # interact badly with Android 16's mediaswcodec apex -- it SIGABRTs at startup.
 # Wild's integration patch DISABLES those hooks, keeping only the setuid hook.
 KSU_URL="https://github.com/KernelSU-Next/KernelSU-Next.git"

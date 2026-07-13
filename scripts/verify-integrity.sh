@@ -31,7 +31,7 @@ WANT=$(sh 'sed -n "s/^DEVICE=//p" /data/adb/avd-fake/profile.env 2>/dev/null | t
 [ -z "$WANT" ] && WANT=$(sh 'sed -n "s/^DEVICE=//p" /data/adb/modules/playintegrityfix/custom.pif.prop 2>/dev/null | head -n1')
 [ -z "$WANT" ] && WANT=tokay
 
-echo "== Identity (every namespace must = profile device '$WANT', not emu64a) =="
+echo "== Identity (every namespace must = profile device '$WANT', not emu64x) =="
 dev=$(sh 'getprop ro.product.vendor.device')
 [ "$dev" = "$WANT" ] && pass "ro.product.vendor.device = $WANT" || fail "ro.product.vendor.device = '$dev' (want $WANT)"
 okp=1

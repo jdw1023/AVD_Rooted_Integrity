@@ -52,7 +52,7 @@
       </div>
       <div class="hero-meta">
         <span><b>Pixel 9 Pro XL</b> · komodo</span>
-        <span><b>android-36</b> · arm64-v8a</span>
+        <span><b>android-36</b> · x86_64</span>
         <span><b>Custom 6.6</b> kernel</span>
       </div>
     </div>
@@ -79,7 +79,7 @@
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v12H4z"/><path d="M2 20h20"/><path d="M8 8h8M8 12h5"/></svg></div>
         <h3>Fingerprint suppression</h3>
-        <p>Per-partition props, <span class="inline-code">/vendor/build.prop</span> bind mounts, and source-level kernel spoofs erase every <code class="inline-c">emu64a</code> / <code class="inline-c">ranchu</code> / <code class="inline-c">goldfish</code> tell from userspace.</p>
+        <p>Per-partition props, <span class="inline-code">/vendor/build.prop</span> bind mounts, and SUSFS <span class="inline-code">/proc</span> redirects erase every <code class="inline-c">emu64x</code> / <code class="inline-c">ranchu</code> / <code class="inline-c">goldfish</code> tell from userspace.</p>
       </div>
       <div class="card">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><path d="m4 4 16 16"/></svg></div>
@@ -178,7 +178,7 @@
     </div>
 
     <div class="steps">
-      <div class="step"><span class="n">1</span><div class="tx"><b>Build the custom kernel</b><span>KSU-Next + SUSFS + anti-emulator source patches → <code class="inline-c">out/Image.gz</code></span></div></div>
+      <div class="step"><span class="n">1</span><div class="tx"><b>Build the custom kernel</b><span>KSU-Next + SUSFS + anti-emulator patches → <code class="inline-c">out/bzImage</code></span></div></div>
       <div class="step"><span class="n">2</span><div class="tx"><b>Boot &amp; install the root stack</b><span>KernelSU-Next manager + SUSFS, ReZygisk, PIF, TEESimulator</span></div></div>
       <div class="step"><span class="n">3</span><div class="tx"><b>Push the on-device setup</b><span>Prop spoofs, bind mounts, SUSFS rules, your keybox at 0644, pinned profile</span></div></div>
       <div class="step"><span class="n">4</span><div class="tx"><b>Cold reboot — exactly once</b><span>Then treat the attestation services as untouchable</span></div></div>
