@@ -103,7 +103,7 @@ predates `CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER` (added in KSU 3.2.6+).
 | Method | What we do |
 |---|---|
 | **Option 1** (KSU 3.2.6+ only) | Enable `CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y` in `build.sh` and **remove** the `patches/x86_64/` step from `apply-patches.sh`. Do **not** pass `syscall_hardening=off`. |
-| **Option 2** (this repo) | Apply `patches/x86_64/01-*.patch` + `02-*.patch` (from [android-generic/kernel_common](https://github.com/android-generic/kernel_common) 6.6 commits `fe9a9b4` + `df772e9`). Boot with `syscall_hardening=off` (`start_avd.sh` passes this via `-append`). |
+| **Option 2** (this repo) | Apply `patches/x86_64/01-*.patch` + `02-*.patch` (from [android-generic/kernel_common](https://github.com/android-generic/kernel_common) 6.6 commits `fe9a9b4` + `df772e9`). Boot with `syscall_hardening=off` (`start_avd.sh` passes it via `-qemu -append` and writes it to `kernel.parameters` in `config.ini`). |
 
 > **Security warning:** Either option intentionally bypasses or weakens a
 > mitigation against speculative-execution attacks on the syscall path. **Do not
@@ -144,9 +144,10 @@ Use the repo-root launcher (uses your host Android SDK):
 AVD=Pixel_9_Pro_XL KERNEL="$PWD/out/bzImage" ../scripts/start_avd.sh
 ```
 
-It passes `-kernel out/bzImage -append syscall_hardening=off -no-snapshot-load
--no-snapshot-save` to the emulator. The AVD's system/vendor/userdata stay exactly
-as they were — only the kernel changes.
+It passes `-kernel out/bzImage -qemu -append syscall_hardening=off -no-snapshot-load
+-no-snapshot-save` to the emulator, syncs `advancedFeatures.ini` (VirtioWifi=off),
+and writes `kernel.parameters` in the AVD's `config.ini`. The AVD's
+system/vendor/userdata stay exactly as they were — only the kernel changes.
 
 ## What to verify after boot
 

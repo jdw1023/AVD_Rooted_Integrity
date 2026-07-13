@@ -18,10 +18,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AVD_TEMPLATE_DIR="${REPO_ROOT}/device/avd-config"
 
-AVD_NAME="${AVD:-Pixel_9_Pro_XL}"
+AVD_NAME="${AVD:-pixel_9_pro_xl}"
 KERNEL="${KERNEL:-$REPO_ROOT/kernel-build/out/bzImage}"
 LOG="${LOG:-$REPO_ROOT/avd-boot.log}"
+SHOW_KERNEL="${SHOW_KERNEL:-0}"
 # x86_64 syscall-hardening bypass: required when using kernel source patches
 # (see kernel-build/README.md). Do not set if you switch to
 # CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER instead.
@@ -50,12 +52,35 @@ if [[ ! -f "$KERNEL" ]]; then
 fi
 command -v adb >/dev/null 2>&1 || { echo "ERROR: adb not on PATH" >&2; exit 1; }
 
-# hw.wifi.enabled=yes is required: it makes QEMU bring up mac80211_hwsim, which
-# the boot scripts wrap as wlan0 via virt_wifi. Patch it in idempotently.
-AVD_CFG="$HOME/.android/avd/${AVD_NAME}.avd/config.ini"
-if [[ -f "$AVD_CFG" ]] && ! grep -q "^hw.wifi.enabled" "$AVD_CFG"; then
-    echo "==> adding hw.wifi.enabled=yes to $AVD_CFG"
-    echo "hw.wifi.enabled = yes" >> "$AVD_CFG"
+# hw.wifi.enabled=yes + VirtioWifi=off: mac80211_hwsim (our kernel has it);
+# virtio-wifi-pci breaks boot with the custom kernel. syscall_hardening=off
+# must reach the guest cmdline — config.ini kernel.parameters alone is often
+# ignored on API 36, so we also pass it via -qemu -append.
+AVD_DIR="$HOME/.android/avd/${AVD_NAME}.avd"
+AVD_CFG="${AVD_DIR}/config.ini"
+ADV_FEAT="${AVD_DIR}/advancedFeatures.ini"
+if [[ -d "$AVD_DIR" ]]; then
+    if [[ -f "$AVD_CFG" ]] && ! grep -q "^hw.wifi.enabled" "$AVD_CFG"; then
+        echo "==> adding hw.wifi.enabled=yes to $AVD_CFG"
+        echo "hw.wifi.enabled = yes" >> "$AVD_CFG"
+    fi
+    if [[ -n "${KERNEL_APPEND}" ]]; then
+        if grep -q '^kernel.parameters' "$AVD_CFG" 2>/dev/null; then
+            if ! grep '^kernel.parameters' "$AVD_CFG" | grep -qF "${KERNEL_APPEND}"; then
+                echo "==> appending ${KERNEL_APPEND} to kernel.parameters in $AVD_CFG"
+                sed -i "s/^\(kernel.parameters =.*\)$/\1 ${KERNEL_APPEND}/" "$AVD_CFG"
+            fi
+        else
+            echo "==> adding kernel.parameters=${KERNEL_APPEND} to $AVD_CFG"
+            echo "kernel.parameters = ${KERNEL_APPEND}" >> "$AVD_CFG"
+        fi
+    fi
+    if [[ -f "${AVD_TEMPLATE_DIR}/advancedFeatures.ini" ]]; then
+        echo "==> syncing advancedFeatures.ini (Wifi=on, VirtioWifi=off)"
+        cp -f "${AVD_TEMPLATE_DIR}/advancedFeatures.ini" "$ADV_FEAT"
+    fi
+else
+    echo "WARNING: AVD dir not found: $AVD_DIR (set AVD= to match your device name)" >&2
 fi
 
 # Cold boot needs a clean slate.
@@ -69,12 +94,26 @@ echo "==> Booting $AVD_NAME with custom kernel:"
 echo "    kernel:   $KERNEL"
 echo "    emulator: $EMU"
 echo "    log:      $LOG"
+if [[ -n "${KERNEL_APPEND}" ]]; then
+    echo "    cmdline:  ${KERNEL_APPEND} (via -qemu -append)"
+fi
 echo
 
+EMU_ARGS=(
+    -avd "$AVD_NAME"
+    -kernel "$KERNEL"
+    -no-snapshot-load
+    -no-snapshot-save
+    -verbose
+)
+if [[ -n "${KERNEL_APPEND}" ]]; then
+    # config.ini kernel.parameters is not always merged on API 36; -qemu -append
+    # is forwarded to qemu-system-x86_64 and does show up in the final cmdline.
+    EMU_ARGS+=( -qemu -append "$KERNEL_APPEND" )
+fi
+if [[ "${SHOW_KERNEL}" == "1" ]]; then
+    EMU_ARGS+=( -show-kernel )
+fi
+
 # -no-snapshot-load forces a cold boot so the -kernel override actually fires.
-exec "$EMU" -avd "$AVD_NAME" \
-    -kernel "$KERNEL" \
-    -append "$KERNEL_APPEND" \
-    -no-snapshot-load \
-    -no-snapshot-save \
-    -verbose 2>&1 | tee "$LOG"
+exec "$EMU" "${EMU_ARGS[@]}" 2>&1 | tee "$LOG"

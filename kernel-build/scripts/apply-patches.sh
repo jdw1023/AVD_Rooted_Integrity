@@ -43,7 +43,8 @@ echo "==> Kernel sublevel: ${SUBLEVEL}"
 # Newer kernels harden the x86_64 syscall path with direct branches, which
 # blocks KSU's syscall-table hooking. These two upstream-derived patches add
 # X86_FEATURE_INDIRECT_SAFE and let `syscall_hardening=off` on the kernel
-# cmdline re-enable the indirect syscall table (start_avd.sh passes that flag).
+# cmdline re-enable the indirect syscall table (start_avd.sh sets
+# kernel.parameters in the AVD config.ini).
 # Do NOT combine with CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER — pick one method.
 # See kernel-build/README.md § x86_64 support.
 # ----------------------------------------------------------------------------
