@@ -112,9 +112,6 @@ EMU_ARGS=(
     -no-snapshot-load
     -no-snapshot-save
     -verbose
-    # Force mac80211_hwsim path; per-AVD advancedFeatures.ini alone is not enough
-    # on emulator 36 — SDK defaults still enable virtio-wifi-pci (see avd-boot.log).
-    -feature VirtioWifi=off
 )
 if [[ -n "${KERNEL_APPEND}" ]]; then
     # config.ini kernel.parameters is not always merged on API 36; -qemu -append
