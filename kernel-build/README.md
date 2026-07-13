@@ -198,11 +198,13 @@ usually means a driver we depend on got disabled. `build.sh` deliberately keeps
 calls still succeed; don't change that.
 
 **KSU build fails on x86_64 (`compat_uptr_t`, `strncpy_from_user`,
-`division by zero`).** Re-run `apply-patches.sh` — step 4b runs
-`fix-ksu-x86_64.sh` after the Wild patch to add `linux/compat.h` to `ksud.h`,
-restore `strncpy_from_user` checks in `sucompat.c`, and relax
-`-Werror=division-by-zero` for the KSU object files. If you patched manually,
-run `bash scripts/fix-ksu-x86_64.sh sources/kernel` inside the container.
+`division by zero`, `TIF_SECCOMP`, `kallsyms_lookup_name`).** Re-run
+`apply-patches.sh` — step 4b runs `fix-ksu-x86_64.sh` after the Wild patch.
+It adds `linux/compat.h` to `ksud.h`, restores `strncpy_from_user` checks in
+`sucompat.c`, relaxes `-Werror=division-by-zero` for KSU objects, switches
+the seccomp guard in `app_profile.c` to `test_syscall_work(SECCOMP)` on
+x86_64, and re-adds `linux/kallsyms.h` to `selinux_hide.c`. If you patched
+manually, run `bash scripts/fix-ksu-x86_64.sh sources/kernel` in the container.
 
 **KSU shows "not installed" after boot.** `CONFIG_KSU` didn't land, or x86_64
 syscall hardening blocked hook init. Confirm with `zcat /proc/config.gz | grep KSU`.

@@ -2,7 +2,9 @@
 # x86_64-only fixes applied after the Wild KSU<->SUSFS integration patch.
 # Wild's ksud.h uses compat_uptr_t under CONFIG_COMPAT but does not include
 # linux/compat.h; sucompat.c drops strncpy_from_user return checks; clang
-# -Werror=division-by-zero trips on kernel headers pulled via extras.c.
+# -Werror=division-by-zero trips on kernel headers pulled via extras.c;
+# app_profile.c tests TIF_SECCOMP (arm64-only on 6.6); selinux_hide.c drops
+# linux/kallsyms.h but still calls kallsyms_lookup_name.
 
 set -euo pipefail
 
@@ -58,6 +60,41 @@ if new == src:
 else:
     open(path, 'w').write(new)
 PY
+fi
+
+AP=drivers/kernelsu/policy/app_profile.c
+if [[ -f "${AP}" ]] && grep -q 'test_thread_flag(TIF_SECCOMP)' "${AP}"; then
+    echo "  - ${AP}: use test_syscall_work(SECCOMP) on CONFIG_GENERIC_ENTRY"
+    python3 - "${AP}" <<'PY'
+import sys, re
+path = sys.argv[1]
+src = open(path).read()
+old = (
+    "\tif (likely(test_thread_flag(TIF_SECCOMP)))\n"
+    "\t\tdisable_seccomp();"
+)
+new = (
+    "#if defined(CONFIG_GENERIC_ENTRY) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)\n"
+    "\tif (likely(test_syscall_work(SECCOMP)))\n"
+    "#else\n"
+    "\tif (likely(test_thread_flag(TIF_SECCOMP)))\n"
+    "#endif\n"
+    "\t\tdisable_seccomp();"
+)
+if old not in src:
+    raise SystemExit("app_profile.c TIF_SECCOMP guard not found")
+open(path, 'w').write(src.replace(old, new, 1))
+PY
+else
+    echo "  - ${AP}: seccomp guard already fixed or absent"
+fi
+
+SH=drivers/kernelsu/feature/selinux_hide.c
+if [[ -f "${SH}" ]] && ! grep -q '<linux/kallsyms.h>' "${SH}"; then
+    echo "  - ${SH}: restore linux/kallsyms.h include"
+    sed -i '/#include <linux\/mutex.h>/a #include <linux/kallsyms.h>' "${SH}"
+else
+    echo "  - ${SH}: kallsyms include already present"
 fi
 
 echo "==> x86_64 KSU build fixes applied"
